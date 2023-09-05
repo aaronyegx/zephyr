@@ -23,8 +23,9 @@
 LOG_MODULE_REGISTER(bt_driver);
 
 #include <am_mcu_apollo.h>
+#include <am_devices_ble_ctrl.h>
 
-#define SPI_DEV_NODE    DT_NODELABEL(spi2)
+#define SPI_DEV_NODE    DT_NODELABEL(iom2)
 #define HCI_SPI_NODE    DT_COMPAT_GET_ANY_STATUS_OKAY(ambiq_bt_hci_spi)
 
 #define HCI_CMD			0x01
@@ -55,6 +56,17 @@ LOG_MODULE_REGISTER(bt_driver);
 static uint8_t g_hciRxMsg[SPI_MAX_RX_MSG_LEN];
 static uint8_t g_nop_packet[6] = {0xe, 0x4, 0x5, 0x0, 0x0, 0x0};
 
+#if defined(CONFIG_BT_HCI_SETUP)
+static uint8_t g_nvds_data[HCI_VSC_UPDATE_NVDS_CFG_CMD_LENGTH]=
+{
+    NVDS_PARAMETER_MAGIC_NUMBER,
+    NVDS_PARAMETER_SLEEP_ALGO_DUR,
+    NVDS_PARAMETER_LPCLK_DRIFT,
+    NVDS_PARAMETER_EXT_WAKEUP_TIME,
+    NVDS_PARAMETER_OSC_WAKEUP_TIME
+};
+#endif /* defined(CONFIG_BT_HCI_SETUP) */
+
 static const struct gpio_dt_spec irq_gpio = GPIO_DT_SPEC_GET(HCI_SPI_NODE, irq_gpios);
 static const struct gpio_dt_spec rst_gpio = GPIO_DT_SPEC_GET(HCI_SPI_NODE, reset_gpios);
 const struct gpio_dt_spec cs_gpio = GPIO_DT_SPEC_GET(HCI_SPI_NODE, cs_gpios);
@@ -65,6 +77,8 @@ static struct gpio_callback	clkreq_gpio_cb;
 
 static K_SEM_DEFINE(sem_irq, 0, 1);
 static K_SEM_DEFINE(sem_spi_available, 1, 1);
+static K_SEM_DEFINE(sem_initialised, 0, 1);
+static bool g_preInitialising = false;
 
 const struct device *spi_dev = DEVICE_DT_GET(SPI_DEV_NODE);
 static struct spi_config spi_cfg = 
@@ -248,6 +262,16 @@ static void bt_spi_rx_thread(void)
 			k_sem_give(&sem_spi_available);
 
 			spi_dump_message("HCI RX: ", g_hciRxMsg, size);
+#if defined(CONFIG_BT_HCI_SETUP)
+			if (g_preInitialising) {
+				am_devices_ble_ctrl_handshake_recv(&g_hciRxMsg[0]);
+				if (am_devices_ble_ctrl_fw_update() == AM_DEVICES_BLE_CTRL_SBL_STATUS_OK) {
+					g_preInitialising = false;
+					k_sem_give(&sem_initialised);
+				}
+				break;
+			}
+#endif /* defined(CONFIG_BT_HCI_SETUP) */
 
 			switch (g_hciRxMsg[PACKET_TYPE]) {
 			case HCI_EVT:
@@ -290,7 +314,7 @@ static void bt_spi_rx_thread(void)
 				} else {
 					net_buf_add_mem(buf, &g_hciRxMsg[1], len);
 					/* Post the RX message to host stack to process */
-					bt_recv(buf);					
+					bt_recv(buf);
 				}
 				break;
 			default:
@@ -306,13 +330,39 @@ static void bt_spi_rx_thread(void)
 	}
 }
 
-static int bt_spi_send(struct net_buf *buf)
+int spi_blocking_send(uint8_t *data, uint32_t len)
 {
 	uint8_t command[1] = {SPI_WRITE};
 	uint8_t response[2] = {0, 0};
 	int ret;
 	uint16_t fail_count = 0;
 
+	do {
+		/* Check if the controller is ready to receive the HCI packets. */
+		ret = bt_spi_transceive(command, 1, response, 2);
+		if ((response[0] != READY_BYTE0) || (response[1] != READY_BYTE1) || ret) {
+			k_sleep(K_MSEC(1));
+			release_cs();
+			k_sleep(K_MSEC(1));
+			configure_cs();
+			k_sleep(K_MSEC(2));
+		} else {
+			/* Transmit the message */
+			ret = bt_spi_transceive(data, len, NULL, 0);
+			spi_dump_message("HCI TX: ", data, len);
+			if (ret) {
+				LOG_ERR("Error %d", ret);
+			}
+			break;
+		}
+	} while (fail_count++ < 200);
+
+	return ret;
+}
+
+static int bt_spi_send(struct net_buf *buf)
+{
+	int ret;
 	LOG_DBG("");
 
 	/* Buffer needs an additional byte for type */
@@ -337,28 +387,8 @@ static int bt_spi_send(struct net_buf *buf)
 		return -EINVAL;
 	}
 
-	do {
-		/* Check if the controller is ready to receive the HCI packets. */		
-		ret = bt_spi_transceive(command, 1, response, 2);
-		if ((response[0] != READY_BYTE0) || (response[1] != READY_BYTE1) || ret)
-		{
-			k_sleep(K_MSEC(1));
-			release_cs();
-			k_sleep(K_MSEC(1));
-			configure_cs();
-			k_sleep(K_MSEC(2));
-		}
-		else
-		{
-			/* Transmit the message */
-			ret = bt_spi_transceive(buf->data, buf->len, NULL, 0);
-			spi_dump_message("HCI TX: ", buf->data, buf->len);
-			if (ret) {
-				LOG_ERR("Error %d", ret);
-			}			
-			break;
-		}
-	} while (fail_count++ < 200);
+	/* Send the SPI packet */
+	ret = spi_blocking_send(buf->data, buf->len);
 
 	/* Free the SPI bus */
 	k_sem_give(&sem_spi_available);
@@ -425,9 +455,27 @@ static int bt_spi_open(void)
 }
 
 #if defined(CONFIG_BT_HCI_SETUP)
+static int bt_set_nvds(void)
+{
+	struct net_buf *buf;
+	buf = bt_hci_cmd_create(HCI_VSC_UPDATE_NVDS_CFG_CMD_OPCODE, HCI_VSC_UPDATE_NVDS_CFG_CMD_LENGTH);
+	if (!buf) {
+		return -ENOBUFS;
+	}
+	uint8_t *p = &g_nvds_data[0];
+	p = net_buf_add(buf, HCI_VSC_UPDATE_NVDS_CFG_CMD_LENGTH);
+	return bt_hci_cmd_send_sync(HCI_VSC_UPDATE_NVDS_CFG_CMD_OPCODE, buf, NULL);
+}
+
 static int bt_spi_setup(void)
 {
-    return 0;
+	am_devices_ble_ctrl_fw_update_init();
+	am_devices_ble_ctrl_fw_update();
+	g_preInitialising = true;
+	/* Device will let us know when it's ready */
+	k_sem_take(&sem_initialised, K_FOREVER);
+
+    return bt_set_nvds();
 }
 #endif /* defined(CONFIG_BT_HCI_SETUP) */
 
