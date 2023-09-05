@@ -106,7 +106,7 @@
 			pinmux = <M2SCK_P25>, <M2MISO_P27>, <M2MOSI_P26>;
 		};
 		group2 {
-			pinmux = <NCE72_P72>;
+			pinmux = <NCE37_P37>;
 			drive-push-pull;
 			ambiq,iom-nce-module = <8>;
 		};
@@ -161,4 +161,14 @@
 			ambiq,iom-nce-module = <28>;
 		};
 	};
+	spi_hci: spi_hci {
+		group1 {
+			pinmux = <M2SCK_P25>, <M2MISO_P27>, <M2MOSI_P26>;
+		};
+		group2 {
+			pinmux = <NCE72_P72>;
+			drive-push-pull;
+			ambiq,iom-nce-module = <8>;
+		};
+	};	
 };

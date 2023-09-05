@@ -44,7 +44,7 @@
 
 &iom2 {
 	compatible = "ambiq,spi";
-	pinctrl-0 = <&spi2_default>;
+	pinctrl-0 = <&spi_hci>;
 	pinctrl-names = "default";
 	clock-frequency = <8000000>;
 	status = "okay";
