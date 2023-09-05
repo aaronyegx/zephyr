@@ -12,4 +12,3 @@ supported:
 testing:
   ignore_tags:
     - net
-    - bluetooth
