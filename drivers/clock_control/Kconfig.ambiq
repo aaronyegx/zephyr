@@ -1,0 +1,13 @@
+# Ambiq Clock Driver configuration options
+#
+# Copyright (c) 2023 Ambiq Micro Inc. <www.ambiq.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+config CLOCK_CONTROL_AMBIQ
+	bool "AMBIQ Clock driver"
+	default y
+	select AMBIQ_HAL
+	help
+	  Enable driver for Ambiq clock.
