@@ -1,0 +1,31 @@
+# Copyright (c) 2023, Ambiq Micro Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+    Bluetooth module that uses Ambiq's Bluetooth Host Controller Interface SPI
+    driver.
+
+compatible: "ambiq,bt-hci-spi"
+
+properties:
+  irq-gpios:
+    type: phandle-array
+    required: true
+
+  reset-gpios:
+    type: phandle-array
+    required: true
+
+  clkreq-gpios:
+    type: phandle-array
+    required: true
+
+  cs-gpios:
+    type: phandle-array
+    required: true
+
+  reset-assert-duration-ms:
+    type: int
+    description:
+      Minimum duration to hold the reset-gpios pin low for.
+      If not specified no delay beyond the code path execution time is guaranteed.

@@ -83,6 +83,22 @@
 	status = "okay";
 };
 
+&iom4 {
+	compatible = "ambiq,spi";
+	pinctrl-0 = <&spi4_default>;
+	pinctrl-names = "default";
+	clock-frequency = <24000000>;
+	status = "okay";
+
+	bt-hci {
+		compatible = "ambiq,bt-hci-spi";
+		irq-gpios = <&gpio32_63 21 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio32_63 23 GPIO_ACTIVE_HIGH>;
+		clkreq-gpios = <&gpio32_63 20 GPIO_ACTIVE_HIGH>;
+		cs-gpios = <&gpio32_63 22 GPIO_ACTIVE_HIGH>;
+	};
+};
+
 &mspi0 {
 	pinctrl-0 = <&mspi0_default>;
 	pinctrl-names = "default";
