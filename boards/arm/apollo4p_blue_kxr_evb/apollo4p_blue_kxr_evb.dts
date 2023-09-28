@@ -134,6 +134,9 @@
 };
 
 &flash0 {
+	erase-block-size = <8192>;
+	write-block-size = <16>;
+
 	partitions {
 		compatible = "fixed-partitions";
 		#address-cells = <1>;

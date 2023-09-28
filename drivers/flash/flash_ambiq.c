@@ -15,9 +15,9 @@
 
 LOG_MODULE_REGISTER(flash_ambiq, CONFIG_FLASH_LOG_LEVEL);
 
-#define SOC_NV_FLASH_ADDR 0x18000
-#define SOC_NV_FLASH_NODE DT_INST(0, soc_nv_flash)
-
+#define SOC_NV_FLASH_NODE  DT_INST(0, soc_nv_flash)
+#define SOC_NV_FLASH_ADDR  DT_REG_ADDR(SOC_NV_FLASH_NODE)
+#define SOC_NV_FLASH_SIZE  DT_REG_SIZE(SOC_NV_FLASH_NODE)
 #define FLASH_WRITE_BLK_SZ DT_PROP(SOC_NV_FLASH_NODE, write_block_size)
 #define FLASH_ERASE_BLK_SZ DT_PROP(SOC_NV_FLASH_NODE, erase_block_size)
 
@@ -28,15 +28,32 @@ struct flash_ambiq_data {
 static struct flash_ambiq_data flash_data;
 
 static const struct flash_parameters flash_ambiq_parameters = {
-	.write_block_size = 16,
+	.write_block_size = FLASH_WRITE_BLK_SZ,
 	.erase_value = 0xff,
 };
+
+static bool flash_ambiq_valid_range(off_t offset, size_t len, bool read)
+{
+	if ((offset > SOC_NV_FLASH_SIZE) || ((offset + len) > SOC_NV_FLASH_SIZE)) {
+		return false;
+	}
+
+	if (!read) {
+		// TODO
+	}
+
+	return true;
+}
 
 static int flash_ambiq_read(const struct device *dev, off_t offset, void *data, size_t len)
 {
 	ARG_UNUSED(dev);
 
-	if (len == 0U) {
+	if (!flash_ambiq_valid_range(offset, len, true)) {
+		return -EINVAL;
+	}
+
+	if (len == 0) {
 		return 0;
 	}
 
@@ -51,13 +68,11 @@ static int flash_ambiq_write(const struct device *dev, off_t offset, const void 
 	int ret = 0;
 	uint32_t ui32Critical = 0;
 
-#if 0
-	if (!flash_ambiq_valid_range(offset, len, true)) {
+	if (!flash_ambiq_valid_range(offset, len, false)) {
 		return -EINVAL;
 	}
-#endif
 
-	if (len == 0U) {
+	if (len == 0) {
 		return 0;
 	}
 
@@ -78,7 +93,11 @@ static int flash_ambiq_erase(const struct device *dev, off_t offset, size_t len)
 	struct flash_ambiq_data *data = dev->data;
 	int ret = 0;
 
-	if (len == 0U) {
+	if (!flash_ambiq_valid_range(offset, len, false)) {
+		return -EINVAL;
+	}
+
+	if (len == 0) {
 		return 0;
 	}
 
@@ -101,8 +120,8 @@ static const struct flash_parameters *flash_ambiq_get_parameters(const struct de
 
 #if CONFIG_FLASH_PAGE_LAYOUT
 static const struct flash_pages_layout pages_layout = {
-	.pages_count = DT_REG_SIZE(SOC_NV_FLASH_NODE) / 8192,
-	.pages_size = 8192,
+	.pages_count = DT_REG_SIZE(SOC_NV_FLASH_NODE) / FLASH_ERASE_BLK_SZ,
+	.pages_size = FLASH_ERASE_BLK_SZ,
 };
 
 static void flash_ambiq_pages_layout(const struct device *dev,
